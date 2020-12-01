@@ -10,8 +10,7 @@
 #include "defs.h"
 
 void freerange(void *pa_start, void *pa_end);
-struct run* alloc(int cpuid);
-int getCPUId();
+
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
@@ -19,18 +18,51 @@ struct run {
   struct run *next;
 };
 
-struct {
+struct kmem {
   struct spinlock lock;
   struct run *freelist;
-} kmems[NCPU];
+};
+
+struct kmem kmems[NCPU];
+
+void
+newkfree(void *pa, int i)
+{
+  struct run *r;
+
+  if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, PGSIZE);
+
+  r = (struct run*)pa;
+
+  acquire(&kmems[i].lock);
+  r->next = kmems[i].freelist;
+  kmems[i].freelist = r;
+  release(&kmems[i].lock);
+}
+
+void
+newfreerange(void *pa_start, void *pa_end, int i)
+{
+  char *p;
+  p = (char*)PGROUNDUP((uint64)pa_start);
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+    newkfree(p,i);
+}
 
 void
 kinit()
 {
-  // int CURCPU = getCPUId();
-  for(int i=0;i<NCPU;++i)
+  void* newend=end;
+  int pad=(int)(((void*)PHYSTOP-(void*)end)/NCPU);
+  for(int i=0;i<NCPU;i++) {
     initlock(&kmems[i].lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+    newfreerange(newend, (void*)(newend+pad), i);
+    newend+=pad;
+  }
 }
 
 void
@@ -41,6 +73,7 @@ freerange(void *pa_start, void *pa_end)
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
 }
+
 
 // Free the page of physical memory pointed at by v,
 // which normally should have been returned by a
@@ -59,13 +92,16 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  int CURCPU = getCPUId();
-  // printf("%d",CURCPU);
-  acquire(&kmems[CURCPU].lock);
-  r->next = kmems[CURCPU].freelist;
-  kmems[CURCPU].freelist = r;
-  release(&kmems[CURCPU].lock);
+  push_off();
+  int id=cpuid();
+  pop_off();
+
+  acquire(&kmems[id].lock);
+  r->next = kmems[id].freelist;
+  kmems[id].freelist = r;
+  release(&kmems[id].lock);
 }
+
 
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
@@ -74,44 +110,34 @@ void *
 kalloc(void)
 {
   struct run *r;
-  
-  // acquire(&kmems[CURCPU].lock);
-  // r = kmems[CURCPU].freelist;
-  // if(r)
-  //   kmems[CURCPU].freelist = r->next;
-  // release(&kmem[CURCPU].lock);
 
-  int CURCPU = getCPUId();
-  r = alloc(CURCPU);
-  // printf("%d",CURCPU);
-  if(r) //get page from current cpu's freelist
-    memset((char*)r, 5, PGSIZE); // fill with junk
-
-  else{ //get the page from other cpus' freelist
-    for(int i=0;i<NCPU;i++){
-      r = alloc(i);
-      if(r){
-        memset((char*)r, 5, PGSIZE);
-        break;
-      }
-    }
-  }
-  return (void*)r;
-}
-
-int getCPUId(){
   push_off();
-  int res = cpuid();
+  int id=cpuid();
   pop_off();
-  return res;
-}
 
-struct run* alloc(int cpuid){
-  struct run* r;
-  acquire(&kmems[cpuid].lock);
-  r = kmems[cpuid].freelist;
+  acquire(&kmems[id].lock);
+  r = kmems[id].freelist;
+  if(r) {
+    kmems[id].freelist = r->next;
+    release(&kmems[id].lock);
+  }
+  else {
+    release(&kmems[id].lock);
+    for(int i=0;i<NCPU;i++)
+      if(i != id) {
+        acquire(&kmems[i].lock);
+        r = kmems[i].freelist;
+        if(r) {
+	  kmems[i].freelist = r->next;
+          release(&kmems[i].lock);
+	  break;
+	}
+	release(&kmems[i].lock);
+      }
+  }
+  
+
   if(r)
-    kmems[cpuid].freelist = r->next;
-  release(&kmems[cpuid].lock);
-  return r;
+    memset((char*)r, 5, PGSIZE); // fill with junk
+  return (void*)r;
 }
