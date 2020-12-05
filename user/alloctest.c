@@ -73,7 +73,9 @@ void test1()
   if(pid == 0){
       close(fds[0]);
       while(1) {
+        // printf("while\n");
         a = sbrk(PGSIZE);
+        printf("a=%d\n",a);
         if (a == (char*)0xffffffffffffffffL)
           exit(0);
         *(int *)(a+4) = 1;
