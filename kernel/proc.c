@@ -338,7 +338,6 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
-
   begin_op(ROOTDEV);
   iput(p->cwd);
   end_op(ROOTDEV);
@@ -358,7 +357,6 @@ exit(int status)
   p->state = ZOMBIE;
 
   release(&p->parent->lock);
-
   // Jump into the scheduler, never to return.
   sched();
   panic("zombie exit");

@@ -75,9 +75,12 @@ void test1()
       while(1) {
         // printf("while\n");
         a = sbrk(PGSIZE);
-        printf("a=%d\n",a);
-        if (a == (char*)0xffffffffffffffffL)
+        // printf("a=%p\n",a);
+        if (a == (char*)0xffffffffffffffffL){
+          // printf("exit\n");
+          // write(fds[1], "", 0);
           exit(0);
+        }
         *(int *)(a+4) = 1;
         if (write(fds[1], "x", 1) != 1) {
           printf("write failed");
@@ -89,11 +92,14 @@ void test1()
   close(fds[1]);
   while(1) {
       if (read(fds[0], buf, 1) != 1) {
+        // printf("read end\n");
         break;
       } else {
         tot += 1;
+        // printf("%d\n",tot);
       }
   }
+  // printf("22222222222222222222222\n");
   //int n = (PHYSTOP-KERNBASE)/PGSIZE;
   //printf("allocated %d out of %d pages\n", tot, n);
   if(tot < 31950) {
