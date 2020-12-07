@@ -34,7 +34,6 @@ typedef struct sz_info Sz_info;
 static Sz_info *bd_sizes; 
 static void *bd_base;   // start address of memory managed by the buddy allocator
 static struct spinlock lock;
-int addr_is_allocated(void*addr, void*left, void*right,int size);
 // Return 1 if bit at position index in array is set to 1
 int bit_isset(char *array, int index) {
   char b = array[index/8];
@@ -187,7 +186,7 @@ bd_free(void *p) {
   acquire(&lock);
   for (k = size(p); k < MAXSIZE; k++) {
     int bi = blk_index(k, p);
-    int buddy = (bi & 1) == 0 ? bi+1 : bi-1;
+    int buddy = ((bi & 1) == 0) ? bi+1 : bi-1;
     bit_toggle(bd_sizes[k].alloc,bi);
     if(bit_get(bd_sizes[k].alloc,buddy)){//buddy is allocated
       break;
@@ -272,7 +271,6 @@ bd_initfree_pair(int k, int bi,int isleft) {
     int odd = (bi & 1) == 0 ? buddy : bi;
     int even = (bi & 1) == 0 ? bi : buddy; 
     free = BLK_SIZE(k);
-    // if(addr_is_allocated(addr(k,buddy),left,right,BLK_SIZE(k)))
     /*
       对于bd_left块，如果出现free,则一定是奇数块
       对于bd_right块，如果出现free，则一定是偶数块
@@ -282,10 +280,6 @@ bd_initfree_pair(int k, int bi,int isleft) {
     else
       lst_push(&bd_sizes[k].free, addr(k, even));
   }
-    // if(bit_isset(bd_sizes[k].alloc, bi))
-    //   lst_push(&bd_sizes[k].free, addr(k, buddy));   // put buddy on free list
-    // else
-    //   lst_push(&bd_sizes[k].free, addr(k, bi));      // put bi on free list
   return free;
 }
   
@@ -355,7 +349,7 @@ bd_init(void *base, void *end) {
   // initialize free list and allocate the alloc array for each size k
   for (int k = 0; k < nsizes; k++) {
     lst_init(&bd_sizes[k].free);
-    sz = sizeof(char)* ROUNDUP(NBLK(k), 8)/8;//分配的空间减少为1/2
+    sz = sizeof(char)* ROUNDUP(NBLK(k), 8)/8;
     sz = ((sz+1)>>1);  //需要向上取整
     bd_sizes[k].alloc = p;
     memset(bd_sizes[k].alloc, 0, sz);
